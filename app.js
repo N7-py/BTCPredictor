@@ -1666,28 +1666,59 @@ const App = {
         }
     },
 
-    /** Auto-record prediction for new window (after tracking is activated) */
+    /** Auto-record prediction for new window (after tracking is activated)
+     *  Waits 20 seconds to allow indicators to use fresher data */
     autoRecordPmPrediction() {
         if (!this.pmTracker.active) return;
         if (!this.pmPriceToBeat || !this.currentPrice) return;
 
-        // Auto-run the target prediction with 5m data
-        this.fetchKlines('5m').then(() => {
-            // Ensure we're on 5m timeframe for the target analysis
-            const data = this.klineData['5m'];
-            if (!data || data.length < 30) return;
+        // Clear any existing delay timer
+        if (this.pmTracker.delayTimer) {
+            clearInterval(this.pmTracker.delayTimer);
+            this.pmTracker.delayTimer = null;
+        }
 
-            this.recordPmPrediction();
+        const DELAY_SECONDS = 20;
+        let remaining = DELAY_SECONDS;
 
-            // Also update the target prediction UI if visible
-            if (this.frozenPrice !== null) {
-                document.getElementById('manualPriceInput').value = this.pmPriceToBeat.toFixed(2);
-                this.frozenPrice = this.pmPriceToBeat;
-                document.getElementById('frozenPrice').textContent =
-                    '$' + this.pmPriceToBeat.toLocaleString('en-US', { minimumFractionDigits: 2 });
-                this.runTargetPrediction(this.pmPriceToBeat);
+        // Show countdown in tracker UI
+        const currentPredEl = document.getElementById('pmTrackerCurrentPred');
+        if (currentPredEl) {
+            currentPredEl.innerHTML = `<span class="tracker-current-label">⏳ Analyzing market data... <strong>${remaining}s</strong></span>`;
+        }
+
+        console.log(`[PM Tracker] Waiting ${DELAY_SECONDS}s before recording prediction...`);
+
+        this.pmTracker.delayTimer = setInterval(() => {
+            remaining--;
+            if (currentPredEl) {
+                currentPredEl.innerHTML = `<span class="tracker-current-label">⏳ Analyzing market data... <strong>${remaining}s</strong></span>`;
             }
-        });
+
+            if (remaining <= 0) {
+                clearInterval(this.pmTracker.delayTimer);
+                this.pmTracker.delayTimer = null;
+
+                // Now fetch fresh 5m data and record the prediction
+                this.fetchKlines('5m').then(() => {
+                    const data = this.klineData['5m'];
+                    if (!data || data.length < 30) return;
+
+                    this.recordPmPrediction();
+
+                    // Also update the target prediction UI if visible
+                    if (this.frozenPrice !== null) {
+                        document.getElementById('manualPriceInput').value = this.pmPriceToBeat.toFixed(2);
+                        this.frozenPrice = this.pmPriceToBeat;
+                        document.getElementById('frozenPrice').textContent =
+                            '$' + this.pmPriceToBeat.toLocaleString('en-US', { minimumFractionDigits: 2 });
+                        this.runTargetPrediction(this.pmPriceToBeat);
+                    }
+
+                    console.log('[PM Tracker] Prediction recorded after 20s delay with fresh data');
+                });
+            }
+        }, 1000);
     },
 
     /** Update the tracker UI display */
