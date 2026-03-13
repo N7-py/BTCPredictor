@@ -1699,23 +1699,32 @@ const App = {
                 clearInterval(this.pmTracker.delayTimer);
                 this.pmTracker.delayTimer = null;
 
-                // Now fetch fresh 5m data and record the prediction
-                this.fetchKlines('5m').then(() => {
+                // Refresh Polymarket odds + fetch fresh 5m kline data simultaneously
+                Promise.all([
+                    this.fetchKlines('5m'),
+                    this.refreshPolymarketOdds()
+                ]).then(() => {
                     const data = this.klineData['5m'];
                     if (!data || data.length < 30) return;
 
-                    this.recordPmPrediction();
-
-                    // Also update the target prediction UI if visible
-                    if (this.frozenPrice !== null) {
+                    // Update the target prediction UI with fresh data BEFORE recording
+                    if (this.pmPriceToBeat) {
                         document.getElementById('manualPriceInput').value = this.pmPriceToBeat.toFixed(2);
                         this.frozenPrice = this.pmPriceToBeat;
                         document.getElementById('frozenPrice').textContent =
                             '$' + this.pmPriceToBeat.toLocaleString('en-US', { minimumFractionDigits: 2 });
+
+                        // Run fresh target prediction to update Up/Down % in UI
                         this.runTargetPrediction(this.pmPriceToBeat);
+
+                        // Also run/refresh the main 5m prediction display
+                        this.runPrediction();
                     }
 
-                    console.log('[PM Tracker] Prediction recorded after 20s delay with fresh data');
+                    // Now record the prediction (uses the just-computed fresh indicators)
+                    this.recordPmPrediction();
+
+                    console.log('[PM Tracker] Prediction recorded after 20s delay with fresh data + updated odds');
                 });
             }
         }, 1000);
