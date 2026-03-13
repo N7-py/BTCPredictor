@@ -13,7 +13,25 @@
 
 const Predictor = {
 
-    // Indicator weights (inspired by BitVision's feature importance)
+    // Default indicator weights (inspired by BitVision's feature importance)
+    defaultWeights: {
+        rsi: 1.2,
+        macd: 1.5,
+        macdHistogram: 1.3,
+        bollingerBands: 1.1,
+        adx: 1.0,
+        stochastic: 1.1,
+        williamsR: 0.9,
+        momentum: 1.3,
+        obvTrend: 1.0,
+        emaCross: 1.4,
+        vwap: 1.0,
+        trix: 0.8,
+        rocr: 0.9,
+        priceVsSma: 1.2
+    },
+
+    // Adaptive weights (modified by self-learning engine)
     weights: {
         rsi: 1.2,
         macd: 1.5,
@@ -29,6 +47,57 @@ const Predictor = {
         trix: 0.8,
         rocr: 0.9,
         priceVsSma: 1.2
+    },
+
+    // Default factor weights for predictVsPrice
+    defaultFactorWeights: {
+        'TA Indicators': 3.0,
+        'ATR Reachability': 2.5,
+        'Historical Frequency': 1.5,
+        'Bollinger Position': 1.5,
+        'Support/Resistance': 2.0,
+        'Volatility': 1.5,
+        'Mean Reversion': 1.0
+    },
+
+    // Adaptive factor weights (modified by self-learning)
+    factorWeights: {
+        'TA Indicators': 3.0,
+        'ATR Reachability': 2.5,
+        'Historical Frequency': 1.5,
+        'Bollinger Position': 1.5,
+        'Support/Resistance': 2.0,
+        'Volatility': 1.5,
+        'Mean Reversion': 1.0
+    },
+
+    /**
+     * Apply weight adjustments from self-learning engine
+     * @param {Object} indicatorAdj - { indicatorKey: newWeight, ... }
+     * @param {Object} factorAdj - { factorName: newWeight, ... }
+     */
+    applyWeightAdjustments(indicatorAdj, factorAdj) {
+        if (indicatorAdj) {
+            for (const [key, val] of Object.entries(indicatorAdj)) {
+                if (this.weights.hasOwnProperty(key)) {
+                    // Clamp weights between 0.1 and 3.0
+                    this.weights[key] = Math.max(0.1, Math.min(3.0, val));
+                }
+            }
+        }
+        if (factorAdj) {
+            for (const [key, val] of Object.entries(factorAdj)) {
+                if (this.factorWeights.hasOwnProperty(key)) {
+                    this.factorWeights[key] = Math.max(0.1, Math.min(5.0, val));
+                }
+            }
+        }
+    },
+
+    /** Reset weights to defaults */
+    resetWeights() {
+        this.weights = { ...this.defaultWeights };
+        this.factorWeights = { ...this.defaultFactorWeights };
     },
 
     /**
@@ -554,15 +623,16 @@ const Predictor = {
             }
         }
 
-        // === Weighted ensemble of all factors ===
+        // === Weighted ensemble of all factors (uses adaptive weights from self-learning) ===
+        const fw = this.factorWeights;
         const factors = [
-            { name: 'TA Indicators', score: momentumAlignment, weight: 3.0 },
-            { name: 'ATR Reachability', score: atrReachability, weight: 2.5 },
-            { name: 'Historical Frequency', score: historicalBias, weight: 1.5 },
-            { name: 'Bollinger Position', score: bbScore, weight: 1.5 },
-            { name: 'Support/Resistance', score: srScore, weight: 2.0 },
-            { name: 'Volatility', score: volScore, weight: 1.5 },
-            { name: 'Mean Reversion', score: meanReversionScore, weight: 1.0 }
+            { name: 'TA Indicators', score: momentumAlignment, weight: fw['TA Indicators'] },
+            { name: 'ATR Reachability', score: atrReachability, weight: fw['ATR Reachability'] },
+            { name: 'Historical Frequency', score: historicalBias, weight: fw['Historical Frequency'] },
+            { name: 'Bollinger Position', score: bbScore, weight: fw['Bollinger Position'] },
+            { name: 'Support/Resistance', score: srScore, weight: fw['Support/Resistance'] },
+            { name: 'Volatility', score: volScore, weight: fw['Volatility'] },
+            { name: 'Mean Reversion', score: meanReversionScore, weight: fw['Mean Reversion'] }
         ];
 
         let totalWeighted = 0;

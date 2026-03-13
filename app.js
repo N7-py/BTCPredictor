@@ -37,9 +37,15 @@ const App = {
     // Prediction Tracker state (tracks target price analysis accuracy for Polymarket 5m)
     pmTracker: {
         active: false,              // Whether auto-tracking is enabled
-        currentPrediction: null,    // Current window's prediction { priceToBeat, predictedUp, probReachTarget, windowStart, windowEnd }
-        results: [],                // Array of { priceToBeat, predictedUp, actualUp, correct, timestamp }
-        successRate: null           // Calculated after 10 results
+        currentPrediction: null,    // Current window's prediction (with full snapshot)
+        results: [],                // Array of detailed result objects
+        successRate: null,          // Calculated after 10 results
+        predictionLog: [],          // Full detailed log with indicator snapshots
+        indicatorAccuracy: {},      // Per-indicator accuracy tracking: { name: { right, wrong, total } }
+        factorAccuracy: {},         // Per-factor accuracy tracking: { name: { right, wrong, total, avgScore } }
+        learningInsights: [],       // Generated insights about wrong predictions
+        weightAdjustments: [],      // History of weight changes
+        learningCycles: 0           // Number of times self-learning has run
     },
 
     // Polymarket API config
@@ -1198,11 +1204,10 @@ const App = {
 
     // ===== Prediction Tracker (Polymarket 5m) =====
 
-    /** Record a prediction for the current Polymarket 5m window */
+    /** Record a prediction for the current Polymarket 5m window (with full snapshot) */
     recordPmPrediction() {
         if (!this.pmPriceToBeat || !this.currentPrice || !this.pmWindowEnd) return;
 
-        // Run target price analysis on 5m data
         const data = this.klineData['5m'];
         if (!data || data.length < 30) return;
 
@@ -1212,37 +1217,56 @@ const App = {
         // Determine our prediction: will BTC be >= priceToBeat at window end?
         let predictedUp;
         if (result.isTargetAbove) {
-            // Target is above current price
-            // If probReachTarget > 50%, we predict price WILL go up to target → UP
             predictedUp = result.probReachTarget > 50;
         } else {
-            // Target is below current price
-            // If probReachTarget > 50%, we predict price WILL drop below target → DOWN
             predictedUp = result.probReachTarget <= 50;
         }
+
+        // Capture full indicator snapshot for learning
+        const signalSnapshot = result.basePrediction.signals.map(s => ({
+            name: s.name,
+            signal: s.signal,
+            score: s.score,
+            weight: s.weight,
+            value: s.value,
+            description: s.description
+        }));
+
+        const factorSnapshot = result.factors.map(f => ({
+            name: f.name,
+            score: f.score,
+            weight: f.weight
+        }));
 
         this.pmTracker.currentPrediction = {
             priceToBeat: this.pmPriceToBeat,
             currentPriceAtPrediction: this.currentPrice,
-            predictedUp: predictedUp,
+            predictedUp,
             probReachTarget: result.probReachTarget,
             isTargetAbove: result.isTargetAbove,
+            distancePct: result.distancePct,
+            confidence: result.confidence,
+            avgScore: result.basePrediction.avgScore,
             windowStart: this.pmWindowStart,
             windowEnd: this.pmWindowEnd,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            // Full snapshots for self-learning
+            signalSnapshot,
+            factorSnapshot
         };
 
         console.log('[PM Tracker] Prediction recorded:', {
             priceToBeat: this.pmPriceToBeat,
             predictedUp,
             probReachTarget: result.probReachTarget,
+            signals: signalSnapshot.length,
             windowEnd: new Date(this.pmWindowEnd * 1000).toLocaleTimeString()
         });
 
         this.updatePmTrackerUI();
     },
 
-    /** Verify the prediction when the 5m window expires */
+    /** Verify the prediction when the 5m window expires — with per-indicator analysis */
     verifyPmPrediction() {
         const pred = this.pmTracker.currentPrediction;
         if (!pred || !this.currentPrice) return;
@@ -1250,19 +1274,87 @@ const App = {
         const actualUp = this.currentPrice >= pred.priceToBeat;
         const correct = pred.predictedUp === actualUp;
 
-        const result = {
+        // Analyze each indicator: was it aligned with the actual outcome?
+        const indicatorResults = [];
+        if (pred.signalSnapshot) {
+            for (const sig of pred.signalSnapshot) {
+                // An indicator was "correct" if its signal matched the actual direction
+                let indicatorCorrect;
+                if (sig.signal === 'buy') {
+                    indicatorCorrect = actualUp;
+                } else if (sig.signal === 'sell') {
+                    indicatorCorrect = !actualUp;
+                } else {
+                    indicatorCorrect = null; // Neutral — can't judge
+                }
+                indicatorResults.push({
+                    name: sig.name,
+                    signal: sig.signal,
+                    score: sig.score,
+                    weight: sig.weight,
+                    correct: indicatorCorrect
+                });
+
+                // Update per-indicator accuracy
+                if (indicatorCorrect !== null) {
+                    if (!this.pmTracker.indicatorAccuracy[sig.name]) {
+                        this.pmTracker.indicatorAccuracy[sig.name] = { right: 0, wrong: 0, total: 0 };
+                    }
+                    const acc = this.pmTracker.indicatorAccuracy[sig.name];
+                    acc.total++;
+                    if (indicatorCorrect) acc.right++;
+                    else acc.wrong++;
+                }
+            }
+        }
+
+        // Analyze each factor
+        const factorResults = [];
+        if (pred.factorSnapshot) {
+            for (const f of pred.factorSnapshot) {
+                // Factor was favorable if score > 0.5 (aligned with reaching target)
+                const factorFavorable = f.score > 0.5;
+                // Actual: did price actually reach the target direction?
+                const actualReached = pred.isTargetAbove ? actualUp : !actualUp;
+                const factorCorrect = factorFavorable === actualReached;
+
+                factorResults.push({
+                    name: f.name,
+                    score: f.score,
+                    weight: f.weight,
+                    correct: factorCorrect
+                });
+
+                if (!this.pmTracker.factorAccuracy[f.name]) {
+                    this.pmTracker.factorAccuracy[f.name] = { right: 0, wrong: 0, total: 0, totalScore: 0 };
+                }
+                const fa = this.pmTracker.factorAccuracy[f.name];
+                fa.total++;
+                fa.totalScore += f.score;
+                if (factorCorrect) fa.right++;
+                else fa.wrong++;
+            }
+        }
+
+        const fullResult = {
             priceToBeat: pred.priceToBeat,
             predictedUp: pred.predictedUp,
-            actualUp: actualUp,
+            actualUp,
             actualPrice: this.currentPrice,
-            correct: correct,
+            correct,
             probReachTarget: pred.probReachTarget,
+            confidence: pred.confidence,
+            distancePct: pred.distancePct,
+            avgScore: pred.avgScore,
             timestamp: Date.now(),
             windowStart: pred.windowStart,
-            windowEnd: pred.windowEnd
+            windowEnd: pred.windowEnd,
+            indicatorResults,
+            factorResults
         };
 
-        this.pmTracker.results.push(result);
+        this.pmTracker.results.push(fullResult);
+        this.pmTracker.predictionLog.push(fullResult);
         this.pmTracker.currentPrediction = null;
 
         console.log(`[PM Tracker] Result: ${correct ? '✅ RIGHT' : '❌ WRONG'} | ` +
@@ -1270,19 +1362,261 @@ const App = {
             `Actual: ${actualUp ? 'UP' : 'DOWN'} | ` +
             `Price: $${this.currentPrice.toFixed(2)} vs Target: $${pred.priceToBeat.toFixed(2)}`);
 
-        // Calculate success rate when we reach 10 results
-        if (this.pmTracker.results.length >= 10 && this.pmTracker.successRate === null) {
-            const rightCount = this.pmTracker.results.filter(r => r.correct).length;
-            this.pmTracker.successRate = Math.round((rightCount / this.pmTracker.results.length) * 100);
-            console.log(`[PM Tracker] 🎯 Success Rate (${this.pmTracker.results.length} predictions): ${this.pmTracker.successRate}%`);
-        }
-        // Recalculate every time we have 10+ results
+        // Calculate success rate
         if (this.pmTracker.results.length >= 10) {
             const rightCount = this.pmTracker.results.filter(r => r.correct).length;
             this.pmTracker.successRate = Math.round((rightCount / this.pmTracker.results.length) * 100);
+
+            // Run self-learning every 5 predictions after the first 10
+            if (this.pmTracker.results.length >= 10 && this.pmTracker.results.length % 5 === 0) {
+                this.selfLearn();
+            }
         }
 
         this.updatePmTrackerUI();
+        this.updatePmLogUI();
+    },
+
+    /** Self-learning engine: analyze patterns and adjust weights */
+    selfLearn() {
+        const tracker = this.pmTracker;
+        const results = tracker.results;
+        if (results.length < 10) return;
+
+        tracker.learningCycles++;
+        console.log(`[Self-Learn] Cycle #${tracker.learningCycles} — Analyzing ${results.length} predictions...`);
+
+        const insights = [];
+        const LEARNING_RATE = 0.15; // How aggressively to adjust weights
+
+        // === 1. Analyze per-indicator accuracy and adjust weights ===
+        const indicatorAdj = {};
+        for (const [name, acc] of Object.entries(tracker.indicatorAccuracy)) {
+            if (acc.total < 5) continue; // Need enough data
+            const accuracy = acc.right / acc.total;
+            const indicatorKey = this.getIndicatorKey(name);
+            if (!indicatorKey) continue;
+
+            const currentWeight = Predictor.weights[indicatorKey];
+            const defaultWeight = Predictor.defaultWeights[indicatorKey];
+
+            if (accuracy >= 0.65) {
+                // Performing well — increase weight
+                const boost = defaultWeight * LEARNING_RATE * (accuracy - 0.5);
+                indicatorAdj[indicatorKey] = currentWeight + boost;
+                insights.push({
+                    type: 'positive',
+                    text: `${name}: ${(accuracy * 100).toFixed(0)}% accurate (${acc.right}/${acc.total}) — weight increased`,
+                    accuracy
+                });
+            } else if (accuracy < 0.4) {
+                // Performing poorly — decrease weight
+                const reduction = defaultWeight * LEARNING_RATE * (0.5 - accuracy);
+                indicatorAdj[indicatorKey] = currentWeight - reduction;
+                insights.push({
+                    type: 'negative',
+                    text: `${name}: ${(accuracy * 100).toFixed(0)}% accurate (${acc.right}/${acc.total}) — weight decreased`,
+                    accuracy
+                });
+            } else {
+                insights.push({
+                    type: 'neutral',
+                    text: `${name}: ${(accuracy * 100).toFixed(0)}% accurate (${acc.right}/${acc.total}) — neutral`,
+                    accuracy
+                });
+            }
+        }
+
+        // === 2. Analyze per-factor accuracy and adjust factor weights ===
+        const factorAdj = {};
+        for (const [name, fa] of Object.entries(tracker.factorAccuracy)) {
+            if (fa.total < 5) continue;
+            const accuracy = fa.right / fa.total;
+
+            const currentWeight = Predictor.factorWeights[name];
+            const defaultWeight = Predictor.defaultFactorWeights[name];
+            if (!currentWeight) continue;
+
+            if (accuracy >= 0.6) {
+                const boost = defaultWeight * LEARNING_RATE * (accuracy - 0.5);
+                factorAdj[name] = currentWeight + boost;
+                insights.push({
+                    type: 'positive',
+                    text: `Factor "${name}": ${(accuracy * 100).toFixed(0)}% accurate — weight boosted`,
+                    accuracy
+                });
+            } else if (accuracy < 0.4) {
+                const reduction = defaultWeight * LEARNING_RATE * (0.5 - accuracy);
+                factorAdj[name] = currentWeight - reduction;
+                insights.push({
+                    type: 'negative',
+                    text: `Factor "${name}": ${(accuracy * 100).toFixed(0)}% accurate — weight reduced`,
+                    accuracy
+                });
+            }
+        }
+
+        // === 3. Pattern analysis on wrong predictions ===
+        const wrongPreds = results.filter(r => !r.correct);
+        const rightPreds = results.filter(r => r.correct);
+
+        if (wrongPreds.length >= 3) {
+            // Check if wrong predictions cluster around certain confidence levels
+            const wrongConfAvg = wrongPreds.reduce((s, r) => s + (r.confidence || 0), 0) / wrongPreds.length;
+            const rightConfAvg = rightPreds.length > 0
+                ? rightPreds.reduce((s, r) => s + (r.confidence || 0), 0) / rightPreds.length : 0;
+
+            if (wrongConfAvg > rightConfAvg) {
+                insights.push({
+                    type: 'warning',
+                    text: `High-confidence predictions tend to be wrong (avg wrong: ${wrongConfAvg.toFixed(0)}% vs right: ${rightConfAvg.toFixed(0)}%) — overconfidence detected`
+                });
+            }
+
+            // Check distance pattern: are wrong predictions associated with small price distances?
+            const wrongDistAvg = wrongPreds.reduce((s, r) => s + Math.abs(r.distancePct || 0), 0) / wrongPreds.length;
+            const rightDistAvg = rightPreds.length > 0
+                ? rightPreds.reduce((s, r) => s + Math.abs(r.distancePct || 0), 0) / rightPreds.length : 0;
+
+            if (wrongDistAvg < 0.05 && rightDistAvg > wrongDistAvg) {
+                insights.push({
+                    type: 'warning',
+                    text: `Wrong predictions cluster near tiny price movements (avg ${(wrongDistAvg).toFixed(4)}%) — noise zone`
+                });
+            }
+        }
+
+        // === 4. Apply weight adjustments ===
+        if (Object.keys(indicatorAdj).length > 0 || Object.keys(factorAdj).length > 0) {
+            Predictor.applyWeightAdjustments(indicatorAdj, factorAdj);
+
+            tracker.weightAdjustments.push({
+                cycle: tracker.learningCycles,
+                timestamp: Date.now(),
+                indicatorAdj: { ...indicatorAdj },
+                factorAdj: { ...factorAdj },
+                totalPredictions: results.length,
+                currentSuccessRate: tracker.successRate
+            });
+
+            console.log('[Self-Learn] Weight adjustments applied:', {
+                indicators: indicatorAdj,
+                factors: factorAdj
+            });
+        }
+
+        // Store insights
+        tracker.learningInsights = insights;
+        console.log(`[Self-Learn] Generated ${insights.length} insights`);
+
+        this.updatePmLogUI();
+    },
+
+    /** Map indicator display name to weight key */
+    getIndicatorKey(name) {
+        const map = {
+            'RSI (14)': 'rsi',
+            'MACD': 'macd',
+            'MACD Histogram': 'macdHistogram',
+            'Bollinger %B': 'bollingerBands',
+            'ADX (14)': 'adx',
+            'Stochastic': 'stochastic',
+            'Williams %R': 'williamsR',
+            'Momentum (10)': 'momentum',
+            'OBV Trend': 'obvTrend',
+            'EMA Cross (9/21)': 'emaCross',
+            'VWAP': 'vwap',
+            'TRIX': 'trix',
+            'ROCR (6)': 'rocr',
+            'Price vs SMA50': 'priceVsSma'
+        };
+        return map[name] || null;
+    },
+
+    /** Update the prediction log UI */
+    updatePmLogUI() {
+        const logEl = document.getElementById('pmLogSection');
+        if (!logEl) return;
+
+        const tracker = this.pmTracker;
+        logEl.style.display = 'block';
+
+        // Update learning cycle count
+        const cycleEl = document.getElementById('pmLearnCycles');
+        if (cycleEl) cycleEl.textContent = tracker.learningCycles;
+
+        // Render indicator accuracy table
+        const accTableEl = document.getElementById('pmIndicatorAccuracy');
+        if (accTableEl) {
+            const entries = Object.entries(tracker.indicatorAccuracy)
+                .filter(([, a]) => a.total >= 2)
+                .sort((a, b) => (b[1].right / b[1].total) - (a[1].right / a[1].total));
+
+            accTableEl.innerHTML = entries.map(([name, acc]) => {
+                const pct = acc.total > 0 ? Math.round((acc.right / acc.total) * 100) : 0;
+                const cls = pct >= 60 ? 'acc-good' : pct < 40 ? 'acc-bad' : 'acc-mid';
+                const key = this.getIndicatorKey(name);
+                const w = key ? Predictor.weights[key].toFixed(2) : '--';
+                return `<div class="acc-row ${cls}">
+                    <span class="acc-name">${name}</span>
+                    <span class="acc-pct">${pct}%</span>
+                    <span class="acc-detail">${acc.right}/${acc.total}</span>
+                    <span class="acc-weight">w:${w}</span>
+                </div>`;
+            }).join('');
+        }
+
+        // Render factor accuracy
+        const facTableEl = document.getElementById('pmFactorAccuracy');
+        if (facTableEl) {
+            const entries = Object.entries(tracker.factorAccuracy)
+                .filter(([, a]) => a.total >= 2)
+                .sort((a, b) => (b[1].right / b[1].total) - (a[1].right / a[1].total));
+
+            facTableEl.innerHTML = entries.map(([name, fa]) => {
+                const pct = fa.total > 0 ? Math.round((fa.right / fa.total) * 100) : 0;
+                const cls = pct >= 60 ? 'acc-good' : pct < 40 ? 'acc-bad' : 'acc-mid';
+                const w = Predictor.factorWeights[name] ? Predictor.factorWeights[name].toFixed(2) : '--';
+                return `<div class="acc-row ${cls}">
+                    <span class="acc-name">${name}</span>
+                    <span class="acc-pct">${pct}%</span>
+                    <span class="acc-detail">${fa.right}/${fa.total}</span>
+                    <span class="acc-weight">w:${w}</span>
+                </div>`;
+            }).join('');
+        }
+
+        // Render insights
+        const insightsEl = document.getElementById('pmLearningInsights');
+        if (insightsEl) {
+            insightsEl.innerHTML = tracker.learningInsights
+                .slice(-8)
+                .map(i => {
+                    const icon = i.type === 'positive' ? '📈' : i.type === 'negative' ? '📉' : i.type === 'warning' ? '⚠️' : 'ℹ️';
+                    return `<div class="insight-row insight-${i.type}">${icon} ${i.text}</div>`;
+                }).join('');
+        }
+
+        // Render recent prediction log
+        const logListEl = document.getElementById('pmPredictionLogList');
+        if (logListEl) {
+            const recent = tracker.predictionLog.slice(-5).reverse();
+            logListEl.innerHTML = recent.map(r => {
+                const time = new Date(r.timestamp).toLocaleTimeString();
+                const icon = r.correct ? '✅' : '❌';
+                const dir = r.predictedUp ? 'UP' : 'DOWN';
+                const actual = r.actualUp ? 'UP' : 'DOWN';
+                const delta = (r.actualPrice - r.priceToBeat).toFixed(2);
+                return `<div class="log-entry ${r.correct ? 'log-right' : 'log-wrong'}">
+                    <span class="log-icon">${icon}</span>
+                    <span class="log-time">${time}</span>
+                    <span class="log-pred">Pred: ${dir}</span>
+                    <span class="log-actual">Act: ${actual}</span>
+                    <span class="log-delta">Δ$${delta}</span>
+                    <span class="log-prob">${r.probReachTarget}%</span>
+                </div>`;
+            }).join('');
+        }
     },
 
     /** Auto-record prediction for new window (after tracking is activated) */
