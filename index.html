@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTC Movement Predictor</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                        <circle cx="16" cy="16" r="15" stroke="url(#grad1)" stroke-width="2"/>
+                        <text x="16" y="21" text-anchor="middle" fill="url(#grad1)" font-size="14" font-weight="bold" font-family="Inter">₿</text>
+                        <defs>
+                            <linearGradient id="grad1" x1="0" y1="0" x2="32" y2="32">
+                                <stop offset="0%" stop-color="#f7931a"/>
+                                <stop offset="100%" stop-color="#ffb347"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <div class="header-title">
+                    <h1>BTC Movement Predictor</h1>
+                    <span class="header-subtitle">Multi-Indicator Ensemble Analysis</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+                <div class="last-update" id="lastUpdate">--</div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel -->
+            <div class="left-panel">
+                <!-- Price Display -->
+                <div class="card price-card">
+                    <div class="price-header">
+                        <span class="pair-name">BTC / USDT</span>
+                        <span class="exchange-badge">Binance</span>
+                    </div>
+                    <div class="current-price" id="currentPrice">--</div>
+                    <div class="price-change" id="priceChange">
+                        <span class="change-value">--</span>
+                        <span class="change-percent">--</span>
+                    </div>
+                    <div class="price-stats">
+                        <div class="stat">
+                            <span class="stat-label">24h High</span>
+                            <span class="stat-value" id="high24h">--</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">24h Low</span>
+                            <span class="stat-value" id="low24h">--</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">24h Volume</span>
+                            <span class="stat-value" id="vol24h">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Timeframe Selection -->
+                <div class="card timeframe-card">
+                    <h3 class="card-title">Prediction Timeframe</h3>
+                    <div class="timeframe-grid">
+                        <button class="tf-btn" data-tf="1m">1m</button>
+                        <button class="tf-btn" data-tf="5m">5m</button>
+                        <button class="tf-btn" data-tf="10m">10m</button>
+                        <button class="tf-btn active" data-tf="30m">30m</button>
+                        <button class="tf-btn" data-tf="1h">1h</button>
+                        <button class="tf-btn" data-tf="4h">4h</button>
+                        <button class="tf-btn" data-tf="1d">1d</button>
+                    </div>
+                </div>
+
+                <!-- Freeze Control -->
+                <div class="card freeze-card">
+                    <h3 class="card-title">Position Freeze</h3>
+                    <p class="freeze-desc">Freeze current price or enter a custom target price</p>
+                    <div class="manual-price-input">
+                        <div class="input-row">
+                            <span class="input-prefix">$</span>
+                            <input type="number" id="manualPriceInput" placeholder="Enter target price..." step="0.01" />
+                        </div>
+                        <button class="manual-predict-btn" id="manualPredictBtn">Predict vs Price</button>
+                    </div>
+                    <div class="freeze-or"><span>or</span></div>
+                    <button class="freeze-btn" id="freezeBtn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="12" x2="15" y2="15"/>
+                        </svg>
+                        <span>Freeze Current Price</span>
+                    </button>
+                    <div class="frozen-info" id="frozenInfo" style="display:none;">
+                        <div class="frozen-price-row">
+                            <span class="frozen-label">Target:</span>
+                            <span class="frozen-price" id="frozenPrice">--</span>
+                        </div>
+                        <div class="frozen-price-row">
+                            <span class="frozen-label">Time:</span>
+                            <span class="frozen-time" id="frozenTime">--</span>
+                        </div>
+                        <div class="frozen-price-row">
+                            <span class="frozen-label">Current Δ:</span>
+                            <span class="frozen-delta" id="frozenDelta">--</span>
+                        </div>
+                        <button class="unfreeze-btn" id="unfreezeBtn">Clear Target</button>
+                    </div>
+                    <!-- Target Price Prediction Result -->
+                    <div class="target-prediction" id="targetPrediction" style="display:none;">
+                        <div class="target-pred-header">Target Price Analysis</div>
+                        <div class="target-pred-prob">
+                            <div class="target-reach">
+                                <span class="target-reach-label" id="targetReachLabel">Reach target:</span>
+                                <span class="target-reach-value" id="targetReachValue">--</span>
+                            </div>
+                            <div class="target-miss">
+                                <span class="target-miss-label">Not reach:</span>
+                                <span class="target-miss-value" id="targetMissValue">--</span>
+                            </div>
+                        </div>
+                        <div class="target-verdict" id="targetVerdict">--</div>
+                        <div class="target-factors" id="targetFactors"></div>
+                    </div>
+                </div>
+
+                <!-- Polymarket 5m -->
+                <div class="card polymarket-card" id="polymarketCard">
+                    <h3 class="card-title">
+                        <span style="color:#8b5cf6;">⬡</span> Polymarket 5m Prediction
+                    </h3>
+                    <div class="pm-status" id="pmStatus">Fetching live market...</div>
+                    <div class="pm-content" id="pmContent" style="display:none;">
+                        <div class="pm-countdown-row">
+                            <span class="pm-countdown-label">Window ends in:</span>
+                            <span class="pm-countdown" id="pmCountdown">--:--</span>
+                        </div>
+                        <div class="pm-price-row">
+                            <span class="pm-ptb-label">Price to beat:</span>
+                            <span class="pm-ptb-value" id="pmPriceToBeat">--</span>
+                        </div>
+                        <div class="pm-odds-row">
+                            <div class="pm-odd pm-up">
+                                <span class="pm-odd-label">Up ≥</span>
+                                <span class="pm-odd-value" id="pmOddsUp">--</span>
+                            </div>
+                            <div class="pm-odd pm-down">
+                                <span class="pm-odd-label">Down &lt;</span>
+                                <span class="pm-odd-value" id="pmOddsDown">--</span>
+                            </div>
+                        </div>
+                        <button class="pm-use-btn" id="pmUseBtn">Use as Target Price</button>
+                        <div class="pm-meta" id="pmMeta"></div>
+                    </div>
+                    <!-- Prediction Accuracy Tracker -->
+                    <div class="pm-tracker-section" id="pmTrackerSection" style="display:none;">
+                        <div class="pm-tracker-header">
+                            <span class="pm-tracker-icon">🎯</span>
+                            <span class="pm-tracker-title">Prediction Tracker</span>
+                        </div>
+                        <div class="pm-tracker-current" id="pmTrackerCurrentPred">
+                            <span class="tracker-current-label">Click "Use as Target Price" to start tracking</span>
+                        </div>
+                        <div class="pm-tracker-counters">
+                            <div class="tracker-counter tracker-right">
+                                <span class="tracker-counter-label">✅ Right</span>
+                                <span class="tracker-counter-value" id="pmTrackerRight">0</span>
+                            </div>
+                            <div class="tracker-counter tracker-wrong">
+                                <span class="tracker-counter-label">❌ Wrong</span>
+                                <span class="tracker-counter-value" id="pmTrackerWrong">0</span>
+                            </div>
+                            <div class="tracker-counter tracker-total">
+                                <span class="tracker-counter-label">Total</span>
+                                <span class="tracker-counter-value" id="pmTrackerTotal">0</span>
+                            </div>
+                        </div>
+                        <div class="pm-tracker-history" id="pmTrackerHistory">
+                            <!-- Filled by JS with dot indicators -->
+                        </div>
+                        <div class="pm-tracker-rate" id="pmTrackerRate" style="display:none;">
+                            <div class="tracker-rate-header">
+                                <span class="tracker-rate-label">Success Rate:</span>
+                                <span class="tracker-rate-value" id="pmTrackerRateValue">--</span>
+                                <span class="tracker-rate-count" id="pmTrackerRateCount">(0/10 to calculate)</span>
+                            </div>
+                            <div class="tracker-rate-bar-track">
+                                <div class="tracker-rate-bar-fill" id="pmTrackerRateBar" style="width:0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Signal Summary -->
+                <div class="card signals-card">
+                    <h3 class="card-title">Indicator Signals</h3>
+                    <div class="signal-summary" id="signalSummary">
+                        <div class="signal-counts">
+                            <div class="signal-count bullish">
+                                <span class="count-num" id="bullCount">0</span>
+                                <span class="count-label">Bullish</span>
+                            </div>
+                            <div class="signal-count neutral">
+                                <span class="count-num" id="neutralCount">0</span>
+                                <span class="count-label">Neutral</span>
+                            </div>
+                            <div class="signal-count bearish">
+                                <span class="count-num" id="bearCount">0</span>
+                                <span class="count-label">Bearish</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Panel -->
+            <div class="center-panel">
+                <!-- Prediction Display -->
+                <div class="card prediction-card">
+                    <div class="prediction-header">
+                        <h3 class="card-title">Price Movement Prediction</h3>
+                        <span class="tf-badge" id="predictionTfBadge">30m</span>
+                    </div>
+                    <div class="prediction-body">
+                        <div class="probability-display">
+                            <div class="prob-up">
+                                <div class="prob-arrow up">▲</div>
+                                <div class="prob-value" id="probUp">--</div>
+                                <div class="prob-label">Bullish</div>
+                            </div>
+                            <div class="prob-gauge">
+                                <div class="gauge-container">
+                                    <div class="gauge-fill-up" id="gaugeFillUp" style="height:50%"></div>
+                                    <div class="gauge-fill-down" id="gaugeFillDown" style="height:50%"></div>
+                                    <div class="gauge-center-line"></div>
+                                </div>
+                            </div>
+                            <div class="prob-down">
+                                <div class="prob-arrow down">▼</div>
+                                <div class="prob-value" id="probDown">--</div>
+                                <div class="prob-label">Bearish</div>
+                            </div>
+                        </div>
+                        <div class="prediction-verdict" id="predictionVerdict">
+                            <span class="verdict-text">Analyzing...</span>
+                        </div>
+                        <div class="confidence-bar">
+                            <span class="conf-label">Confidence:</span>
+                            <div class="conf-track">
+                                <div class="conf-fill" id="confFill" style="width:0%"></div>
+                            </div>
+                            <span class="conf-value" id="confValue">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chart -->
+                <div class="card chart-card">
+                    <div class="chart-header">
+                        <h3 class="card-title">Price Chart</h3>
+                        <div class="chart-tf-selector">
+                            <button class="chart-tf-btn active" data-chart-tf="1m">1m</button>
+                            <button class="chart-tf-btn" data-chart-tf="5m">5m</button>
+                            <button class="chart-tf-btn" data-chart-tf="15m">15m</button>
+                            <button class="chart-tf-btn" data-chart-tf="1h">1h</button>
+                            <button class="chart-tf-btn" data-chart-tf="4h">4h</button>
+                            <button class="chart-tf-btn" data-chart-tf="1d">1d</button>
+                        </div>
+                    </div>
+                    <div id="chartContainer" class="chart-container"></div>
+                </div>
+            </div>
+
+            <!-- Right Panel -->
+            <div class="right-panel">
+                <!-- Indicators Detail -->
+                <div class="card indicators-card">
+                    <h3 class="card-title">Technical Indicators</h3>
+                    <div class="indicators-list" id="indicatorsList">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Methodology -->
+                <div class="card methodology-card">
+                    <h3 class="card-title">Methodology</h3>
+                    <div class="method-content">
+                        <p>Ensemble prediction combining <strong>12 technical indicators</strong> inspired by:</p>
+                        <ul>
+                            <li><strong>BitVision</strong> — Logistic regression with TA features</li>
+                            <li><strong>LSTM Models</strong> — Momentum & trend patterns</li>
+                            <li><strong>Stock Analysis</strong> — Bollinger, MACD, RSI</li>
+                        </ul>
+                        <p class="disclaimer">⚠ For educational purposes only. Not financial advice.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="indicators.js"></script>
+    <script src="predictor.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
