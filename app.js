@@ -917,8 +917,14 @@ const App = {
                         this.pmEventId = data.eventId;
 
                         if (data.priceToBeat) {
-                            this.pmPriceToBeat = data.priceToBeat;
-                            console.log('[Polymarket] Got priceToBeat from current event:', data.priceToBeat);
+                            // Validate: if server flagged as stale, use Binance price instead
+                            if (data.validated === false && data.binancePrice) {
+                                console.warn(`[Polymarket] Stale priceToBeat ($${data.priceToBeat.toFixed(2)}), using Binance ($${data.binancePrice.toFixed(2)})`);
+                                this.pmPriceToBeat = data.binancePrice;
+                            } else {
+                                this.pmPriceToBeat = data.priceToBeat;
+                            }
+                            console.log('[Polymarket] Got priceToBeat:', this.pmPriceToBeat);
                             this.updatePolymarketUI();
                             return;
                         }
