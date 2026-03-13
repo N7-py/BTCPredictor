@@ -1398,37 +1398,40 @@ const App = {
             `Actual: ${actualUp ? 'UP' : 'DOWN'} | ` +
             `Price: $${this.currentPrice.toFixed(2)} vs Target: $${pred.priceToBeat.toFixed(2)}`);
 
-        // Calculate success rate
-        if (this.pmTracker.results.length >= 10) {
+        // Calculate success rate when we have enough data
+        const totalResults = this.pmTracker.results.length;
+        if (totalResults >= 10) {
             const rightCount = this.pmTracker.results.filter(r => r.correct).length;
-            this.pmTracker.successRate = Math.round((rightCount / this.pmTracker.results.length) * 100);
+            this.pmTracker.successRate = Math.round((rightCount / totalResults) * 100);
+        }
 
-            // Run self-learning every 5 predictions after the first 10
-            if (this.pmTracker.results.length >= 10 && this.pmTracker.results.length % 5 === 0) {
-                this.selfLearn();
-            }
+        // Run self-learning EVERY cycle after at least 3 results
+        // This ensures insights are applied to the very next prediction
+        if (totalResults >= 3) {
+            this.selfLearn();
         }
 
         this.updatePmTrackerUI();
         this.updatePmLogUI();
     },
 
-    /** Self-learning engine: analyze patterns and adjust weights */
+    /** Self-learning engine: analyze patterns and adjust weights EVERY cycle */
     selfLearn() {
         const tracker = this.pmTracker;
         const results = tracker.results;
-        if (results.length < 10) return;
+        if (results.length < 3) return; // Need at least 3 results to learn
 
         tracker.learningCycles++;
         console.log(`[Self-Learn] Cycle #${tracker.learningCycles} — Analyzing ${results.length} predictions...`);
 
         const insights = [];
-        const LEARNING_RATE = 0.15; // How aggressively to adjust weights
+        // Aggressive learning rate for rapid adaptation
+        const LEARNING_RATE = 0.25;
 
         // === 1. Analyze per-indicator accuracy and adjust weights ===
         const indicatorAdj = {};
         for (const [name, acc] of Object.entries(tracker.indicatorAccuracy)) {
-            if (acc.total < 5) continue; // Need enough data
+            if (acc.total < 2) continue; // Start learning after just 2 samples
             const accuracy = acc.right / acc.total;
             const indicatorKey = this.getIndicatorKey(name);
             if (!indicatorKey) continue;
@@ -1466,7 +1469,7 @@ const App = {
         // === 2. Analyze per-factor accuracy and adjust factor weights ===
         const factorAdj = {};
         for (const [name, fa] of Object.entries(tracker.factorAccuracy)) {
-            if (fa.total < 5) continue;
+            if (fa.total < 2) continue; // Start learning after just 2 samples
             const accuracy = fa.right / fa.total;
 
             const currentWeight = Predictor.factorWeights[name];
