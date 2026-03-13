@@ -45,7 +45,9 @@ const App = {
         factorAccuracy: {},         // Per-factor accuracy tracking: { name: { right, wrong, total, avgScore } }
         learningInsights: [],       // Generated insights about wrong predictions
         weightAdjustments: [],      // History of weight changes
-        learningCycles: 0           // Number of times self-learning has run
+        learningCycles: 0,          // Number of times self-learning has run
+        analysisScheduled: false,   // Whether 20s analysis is scheduled for this window
+        dataReady: false            // Whether new window data has been fetched
     },
 
     // Polymarket API config
@@ -1112,6 +1114,9 @@ const App = {
             // Window expired — fetch new window data
             // Small delay to let the new market be created
             clearInterval(this.pmCountdownInterval);
+            // Reset analysis flags for the new window
+            this.pmTracker.analysisScheduled = false;
+            this.pmTracker.dataReady = false;
             setTimeout(() => {
                 this.pmPriceToBeat = null;
                 this.pmEventId = null;
@@ -1122,8 +1127,9 @@ const App = {
                 document.getElementById('pmContent').style.display = 'none';
                 countdownEl.style.color = '#8b5cf6';
                 this.fetchPolymarketData().then(() => {
-                    // Auto-record prediction for the new window if tracking is active
-                    this.autoRecordPmPrediction();
+                    // Mark data as ready — analysis will be triggered by countdown at 4:55
+                    this.pmTracker.dataReady = true;
+                    console.log('[PM Tracker] Data ready, waiting for 4:55 on countdown to start analysis');
                 });
                 this.pmCountdownInterval = setInterval(() => this.updatePolymarketCountdown(), 1000);
             }, 5000);
@@ -1134,6 +1140,16 @@ const App = {
         const secs = remaining % 60;
         countdownEl.textContent =
             String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+
+        // === Auto-trigger 20s analysis at exactly 4:55 remaining (5s into window) ===
+        // remaining 295 = 4:55, remaining 300 = 5:00
+        if (remaining <= 295 && remaining >= 275 &&
+            this.pmTracker.active && this.pmTracker.dataReady &&
+            !this.pmTracker.analysisScheduled && !this.pmTracker.currentPrediction) {
+            this.pmTracker.analysisScheduled = true;
+            console.log(`[PM Tracker] Countdown at ${mins}:${String(secs).padStart(2, '0')} — starting 20s analysis`);
+            this.autoRecordPmPrediction();
+        }
 
         // Flash warning when < 30 seconds
         if (remaining < 30) {

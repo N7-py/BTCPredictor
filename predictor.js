@@ -50,25 +50,26 @@ const Predictor = {
     },
 
     // Default factor weights for predictVsPrice
+    // Priority: Volatility=100%, Historical Frequency=100%, TA=65%, Bollinger=50%, rest<50%
     defaultFactorWeights: {
-        'TA Indicators': 3.0,
-        'ATR Reachability': 2.5,
-        'Historical Frequency': 1.5,
-        'Bollinger Position': 1.5,
-        'Support/Resistance': 2.0,
-        'Volatility': 1.5,
-        'Mean Reversion': 1.0
+        'TA Indicators': 3.25,          // 65% priority
+        'ATR Reachability': 2.0,        // <50% priority
+        'Historical Frequency': 5.0,    // 100% priority (highest)
+        'Bollinger Position': 2.5,      // 50% priority
+        'Support/Resistance': 2.0,      // <50% priority
+        'Volatility': 5.0,             // 100% priority (highest)
+        'Mean Reversion': 1.5           // <50% priority
     },
 
     // Adaptive factor weights (modified by self-learning)
     factorWeights: {
-        'TA Indicators': 3.0,
-        'ATR Reachability': 2.5,
-        'Historical Frequency': 1.5,
-        'Bollinger Position': 1.5,
-        'Support/Resistance': 2.0,
-        'Volatility': 1.5,
-        'Mean Reversion': 1.0
+        'TA Indicators': 3.25,          // 65% priority
+        'ATR Reachability': 2.0,        // <50% priority
+        'Historical Frequency': 5.0,    // 100% priority (highest)
+        'Bollinger Position': 2.5,      // 50% priority
+        'Support/Resistance': 2.0,      // <50% priority
+        'Volatility': 5.0,             // 100% priority (highest)
+        'Mean Reversion': 1.5           // <50% priority
     },
 
     /**
