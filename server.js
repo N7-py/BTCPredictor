@@ -99,36 +99,115 @@ const server = http.createServer((req, res) => {
                     const html = Buffer.concat(chunks).toString('utf-8');
                     console.log(`[Scrape] HTML length: ${html.length}, hasNEXT: ${html.includes('__NEXT_DATA__')}`);
                 try {
-                    // Extract data using targeted string searches (avoid parsing 2MB JSON)
+                    // Extract data from the page — look for __NEXT_DATA__ JSON first,
+                    // then fall back to targeted regex
                     let openPrice = null, closePrice = null;
                     let oddsUp = null, oddsDown = null;
                     let title = '', eventId = null;
 
-                    // Find openPrice from crypto-prices data
-                    const openPriceMatch = html.match(/"openPrice"\s*:\s*([\d.]+)/);
-                    if (openPriceMatch) openPrice = parseFloat(openPriceMatch[1]);
-
-                    const closePriceMatch = html.match(/"closePrice"\s*:\s*([\d.]+)/);
-                    if (closePriceMatch) closePrice = parseFloat(closePriceMatch[1]);
-
-                    // Find outcomePrices for odds: "outcomePrices":["0.505","0.495"]
-                    const oddsMatch = html.match(/"outcomePrices"\s*:\s*\["([\d.]+)"\s*,\s*"([\d.]+)"\]/);
-                    if (oddsMatch) {
-                        oddsUp = parseFloat(oddsMatch[1]);
-                        oddsDown = parseFloat(oddsMatch[2]);
+                    // Try to extract __NEXT_DATA__ and find the crypto-prices data for THIS slug
+                    const nextDataMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+                    if (nextDataMatch) {
+                        try {
+                            const nextData = JSON.parse(nextDataMatch[1]);
+                            // Navigate the data structure to find the event matching our slug
+                            const queries = nextData?.props?.pageProps?.dehydratedState?.queries || [];
+                            for (const q of queries) {
+                                const data = q?.state?.data;
+                                if (!data) continue;
+                                
+                                // Check if this query contains crypto-prices data with openPrice
+                                if (data.openPrice !== undefined && typeof data.openPrice === 'number') {
+                                    openPrice = data.openPrice;
+                                    if (data.closePrice !== undefined && data.closePrice !== null) {
+                                        closePrice = data.closePrice;
+                                    }
+                                    console.log(`[Scrape] Found openPrice from __NEXT_DATA__: ${openPrice}`);
+                                }
+                                
+                                // Check for event data with markets
+                                if (data.markets && Array.isArray(data.markets)) {
+                                    for (const mkt of data.markets) {
+                                        if (mkt.outcomePrices) {
+                                            try {
+                                                const prices = JSON.parse(mkt.outcomePrices);
+                                                oddsUp = parseFloat(prices[0]);
+                                                oddsDown = parseFloat(prices[1]);
+                                            } catch (e) {}
+                                        }
+                                    }
+                                    if (data.title) title = data.title;
+                                    if (data.id) eventId = data.id;
+                                    
+                                    // Check eventMetadata for priceToBeat
+                                    const meta = data.eventMetadata || {};
+                                    if (meta.priceToBeat) {
+                                        const ptb = parseFloat(meta.priceToBeat);
+                                        if (!isNaN(ptb) && ptb > 0) {
+                                            openPrice = openPrice || ptb;
+                                            console.log(`[Scrape] priceToBeat from metadata: ${ptb}`);
+                                        }
+                                    }
+                                }
+                                
+                                // Check if it's an array of events
+                                if (Array.isArray(data)) {
+                                    for (const item of data) {
+                                        if (item?.slug === slug || (item?.markets && item?.title?.includes('Bitcoin'))) {
+                                            if (item.markets) {
+                                                for (const mkt of item.markets) {
+                                                    if (mkt.outcomePrices) {
+                                                        try {
+                                                            const prices = JSON.parse(mkt.outcomePrices);
+                                                            oddsUp = parseFloat(prices[0]);
+                                                            oddsDown = parseFloat(prices[1]);
+                                                        } catch (e) {}
+                                                    }
+                                                }
+                                            }
+                                            if (item.title) title = item.title;
+                                            if (item.id) eventId = item.id;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (jsonErr) {
+                            console.log('[Scrape] __NEXT_DATA__ parse failed, using regex fallback');
+                        }
                     }
 
-                    // Find title
-                    const titleMatch = html.match(/"title"\s*:\s*"(Bitcoin Up or Down[^"]+)"/);
-                    if (titleMatch) title = titleMatch[1];
+                    // Regex fallback for anything not found from __NEXT_DATA__
+                    if (!openPrice) {
+                        const openPriceMatch = html.match(/"openPrice"\s*:\s*([\d.]+)/);
+                        if (openPriceMatch) openPrice = parseFloat(openPriceMatch[1]);
+                    }
 
-                    // Find event ID  
-                    const idMatch = html.match(/"id"\s*:\s*"?(\d{5,})"?/);
-                    if (idMatch) eventId = parseInt(idMatch[1]);
+                    if (!closePrice) {
+                        const closePriceMatch = html.match(/"closePrice"\s*:\s*([\d.]+)/);
+                        if (closePriceMatch) closePrice = parseFloat(closePriceMatch[1]);
+                    }
 
-                    // Find priceToBeat from eventMetadata
+                    if (!oddsUp) {
+                        const oddsMatch = html.match(/"outcomePrices"\s*:\s*\["([\d.]+)"\s*,\s*"([\d.]+)"\]/);
+                        if (oddsMatch) {
+                            oddsUp = parseFloat(oddsMatch[1]);
+                            oddsDown = parseFloat(oddsMatch[2]);
+                        }
+                    }
+
+                    if (!title) {
+                        const titleMatch = html.match(/"title"\s*:\s*"(Bitcoin Up or Down[^"]+)"/);
+                        if (titleMatch) title = titleMatch[1];
+                    }
+
+                    if (!eventId) {
+                        const idMatch = html.match(/"id"\s*:\s*"?(\d{5,})"?/);
+                        if (idMatch) eventId = parseInt(idMatch[1]);
+                    }
+
+                    // Find priceToBeat from eventMetadata as fallback
                     const ptbMatch = html.match(/"priceToBeat"\s*:\s*"?([\d.]+)"?/);
-                    
+
                     let priceToBeat = openPrice;
                     if (!priceToBeat && ptbMatch) priceToBeat = parseFloat(ptbMatch[1]);
 
