@@ -153,13 +153,24 @@ const server = http.createServer((req, res) => {
                                     const data = q?.state?.data;
                                     if (!data) continue;
 
-                                    // Check if this query contains crypto-prices data with openPrice
-                                    if (data.openPrice !== undefined && typeof data.openPrice === 'number') {
+                                    // PRIORITY: Match crypto-prices query specifically by queryKey
+                                    const qk = JSON.stringify(q.queryKey || '');
+                                    if (qk.includes('crypto-prices') && data.openPrice !== undefined && typeof data.openPrice === 'number') {
                                         openPrice = data.openPrice;
                                         if (data.closePrice !== undefined && data.closePrice !== null) {
                                             closePrice = data.closePrice;
                                         }
-                                        console.log(`[Scrape] Found openPrice from __NEXT_DATA__: ${openPrice}`);
+                                        console.log(`[Scrape] Found openPrice from crypto-prices query: ${openPrice}`);
+                                        // Don't continue looking — this is the definitive source
+                                    }
+
+                                    // Fallback: any query with openPrice (less reliable)
+                                    if (!openPrice && data.openPrice !== undefined && typeof data.openPrice === 'number') {
+                                        openPrice = data.openPrice;
+                                        if (data.closePrice !== undefined && data.closePrice !== null) {
+                                            closePrice = data.closePrice;
+                                        }
+                                        console.log(`[Scrape] Found openPrice from generic query: ${openPrice}`);
                                     }
 
                                     // Check for event data with markets
@@ -243,11 +254,11 @@ const server = http.createServer((req, res) => {
                         if (!priceToBeat && ptbMatch) priceToBeat = parseFloat(ptbMatch[1]);
 
                         // === Validate priceToBeat against Binance price ===
-                        // If the scraped price differs by > 1% from Binance, it's likely stale/wrong
+                        // If the scraped price differs by > 0.5% from Binance, it's likely stale/wrong
                         let validated = true;
                         if (priceToBeat && lastBinancePrice) {
                             const diffPct = Math.abs(priceToBeat - lastBinancePrice) / lastBinancePrice * 100;
-                            if (diffPct > 1.0) {
+                            if (diffPct > 0.5) {
                                 console.warn(`[Scrape] ⚠️ priceToBeat ($${priceToBeat.toFixed(2)}) differs ${diffPct.toFixed(2)}% from Binance ($${lastBinancePrice.toFixed(2)}) — likely stale!`);
                                 validated = false;
                             }

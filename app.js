@@ -917,12 +917,26 @@ const App = {
                         this.pmEventId = data.eventId;
 
                         if (data.priceToBeat) {
-                            // Validate: if server flagged as stale, use Binance price instead
-                            if (data.validated === false && data.binancePrice) {
-                                console.warn(`[Polymarket] Stale priceToBeat ($${data.priceToBeat.toFixed(2)}), using Binance ($${data.binancePrice.toFixed(2)})`);
-                                this.pmPriceToBeat = data.binancePrice;
+                            // Validate: if server flagged as stale, retry once after 3s
+                            if (data.validated === false) {
+                                console.warn(`[Polymarket] Stale priceToBeat ($${data.priceToBeat.toFixed(2)}), retrying in 3s...`);
+                                if (!this._pmRetryCount) this._pmRetryCount = 0;
+                                this._pmRetryCount++;
+                                if (this._pmRetryCount <= 2) {
+                                    setTimeout(() => this.fetchPolymarketData(), 3000);
+                                    return;
+                                }
+                                // After 2 retries, use Binance price as fallback
+                                if (data.binancePrice) {
+                                    console.warn(`[Polymarket] Using Binance fallback ($${data.binancePrice.toFixed(2)}) after ${this._pmRetryCount} retries`);
+                                    this.pmPriceToBeat = data.binancePrice;
+                                } else {
+                                    this.pmPriceToBeat = data.priceToBeat;
+                                }
+                                this._pmRetryCount = 0;
                             } else {
                                 this.pmPriceToBeat = data.priceToBeat;
+                                this._pmRetryCount = 0;
                             }
                             console.log('[Polymarket] Got priceToBeat:', this.pmPriceToBeat);
                             this.updatePolymarketUI();
