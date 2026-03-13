@@ -1488,20 +1488,67 @@ const App = {
 
         // === 4. Apply weight adjustments ===
         if (Object.keys(indicatorAdj).length > 0 || Object.keys(factorAdj).length > 0) {
+            // Capture old weights for comparison
+            const oldIndicatorWeights = {};
+            for (const key of Object.keys(indicatorAdj)) {
+                oldIndicatorWeights[key] = Predictor.weights[key];
+            }
+            const oldFactorWeights = {};
+            for (const key of Object.keys(factorAdj)) {
+                oldFactorWeights[key] = Predictor.factorWeights[key];
+            }
+
             Predictor.applyWeightAdjustments(indicatorAdj, factorAdj);
+
+            // Log what changed with old → new values
+            const changeDetails = [];
+            for (const key of Object.keys(indicatorAdj)) {
+                const oldW = oldIndicatorWeights[key].toFixed(3);
+                const newW = Predictor.weights[key].toFixed(3);
+                if (oldW !== newW) {
+                    changeDetails.push(`${key}: ${oldW} → ${newW}`);
+                }
+            }
+            for (const key of Object.keys(factorAdj)) {
+                const oldW = oldFactorWeights[key].toFixed(3);
+                const newW = Predictor.factorWeights[key].toFixed(3);
+                if (oldW !== newW) {
+                    changeDetails.push(`${key}: ${oldW} → ${newW}`);
+                }
+            }
 
             tracker.weightAdjustments.push({
                 cycle: tracker.learningCycles,
                 timestamp: Date.now(),
                 indicatorAdj: { ...indicatorAdj },
                 factorAdj: { ...factorAdj },
+                changeDetails,
                 totalPredictions: results.length,
                 currentSuccessRate: tracker.successRate
             });
 
-            console.log('[Self-Learn] Weight adjustments applied:', {
+            // Add a confirmation insight showing weights were applied
+            insights.push({
+                type: 'applied',
+                text: `✅ Cycle #${tracker.learningCycles}: ${changeDetails.length} weight(s) updated — next prediction will use new weights`
+            });
+
+            if (changeDetails.length > 0) {
+                insights.push({
+                    type: 'applied',
+                    text: `Weight changes: ${changeDetails.slice(0, 4).join(', ')}${changeDetails.length > 4 ? ` (+${changeDetails.length - 4} more)` : ''}`
+                });
+            }
+
+            console.log('[Self-Learn] Weight adjustments APPLIED:', {
                 indicators: indicatorAdj,
-                factors: factorAdj
+                factors: factorAdj,
+                changes: changeDetails
+            });
+        } else {
+            insights.push({
+                type: 'neutral',
+                text: `Cycle #${tracker.learningCycles}: No weight changes needed (all indicators within normal accuracy range)`
             });
         }
 
@@ -1592,7 +1639,7 @@ const App = {
             insightsEl.innerHTML = tracker.learningInsights
                 .slice(-8)
                 .map(i => {
-                    const icon = i.type === 'positive' ? '📈' : i.type === 'negative' ? '📉' : i.type === 'warning' ? '⚠️' : 'ℹ️';
+                    const icon = i.type === 'positive' ? '📈' : i.type === 'negative' ? '📉' : i.type === 'warning' ? '⚠️' : i.type === 'applied' ? '✅' : 'ℹ️';
                     return `<div class="insight-row insight-${i.type}">${icon} ${i.text}</div>`;
                 }).join('');
         }
