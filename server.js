@@ -38,6 +38,13 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // Health check endpoint (for Render deployment)
+    if (parsed.pathname === '/health' || parsed.pathname === '/healthz') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', uptime: process.uptime() }));
+        return;
+    }
+
     // Scrape Polymarket page for live priceToBeat (openPrice from crypto-prices query)
     if (parsed.pathname.startsWith('/api/pm-price/')) {
         const slug = parsed.pathname.replace('/api/pm-price/', '');
